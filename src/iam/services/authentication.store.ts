@@ -19,11 +19,17 @@ export const useAuthenticationStore = defineStore('authentication', () => {
   const profileId = ref<number | null>(null);
 
   // --- Initialization ---
-  // If a token already exists in localStorage, mark the user as signed in.
-  // Profile fetching will be handled when the app mounts.
+  // If a token already exists in localStorage, mark the user as signed in
+  // and restore userId/email from stored values.
   const existingToken = localStorage.getItem(TOKEN_KEY);
   if (existingToken) {
     signedIn.value = true;
+    const storedUserId = localStorage.getItem('userId');
+    const storedEmail = localStorage.getItem('userEmail');
+    const storedProfileId = localStorage.getItem('profileId');
+    if (storedUserId) userId.value = Number(storedUserId);
+    if (storedEmail) email.value = storedEmail;
+    if (storedProfileId) profileId.value = Number(storedProfileId);
   }
 
   // --- Actions ---
@@ -34,6 +40,8 @@ export const useAuthenticationStore = defineStore('authentication', () => {
    */
   function signIn(response: SignInResponse): void {
     localStorage.setItem(TOKEN_KEY, response.token);
+    localStorage.setItem('userId', String(response.id));
+    localStorage.setItem('userEmail', response.email);
     signedIn.value = true;
     userId.value = response.id;
     email.value = response.email;
@@ -46,6 +54,9 @@ export const useAuthenticationStore = defineStore('authentication', () => {
    */
   function signOut(): void {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem('userId');
+    localStorage.removeItem('userEmail');
+    localStorage.removeItem('profileId');
     signedIn.value = false;
     userId.value = null;
     email.value = '';

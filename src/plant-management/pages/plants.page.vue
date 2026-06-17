@@ -41,12 +41,10 @@ async function loadPlants() {
       const profile = await profileApi.getByUserId(authStore.userId);
       profileId.value = profile.id;
       authStore.profileId = profile.id;
+      localStorage.setItem('profileId', String(profile.id));
       plants.value = await PlantService.getByProfile(profile.id);
     } else {
-      plants.value = await PlantService.getAll();
-      if (plants.value.length > 0) {
-        profileId.value = plants.value[0].profileId;
-      }
+      plants.value = [];
     }
   } catch {
     plants.value = [];
