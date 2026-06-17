@@ -1,18 +1,32 @@
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function handler(request) {
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   const HF_TOKEN = process.env.HF_TOKEN;
   if (!HF_TOKEN) {
-    return res.status(500).json({ error: 'HF_TOKEN not configured' });
+    return new Response(JSON.stringify({ error: 'HF_TOKEN not configured' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   try {
-    const { messages } = req.body;
+    const body = await request.json();
+    const { messages } = body;
 
     if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: 'messages array is required' });
+      return new Response(JSON.stringify({ error: 'messages array is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     const response = await fetch(
@@ -34,16 +48,23 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('HF API error:', response.status, errorText);
-      return res.status(response.status).json({ error: 'AI service error', details: errorText });
+      return new Response(JSON.stringify({ error: 'AI service error', status: response.status, details: errorText }), {
+        status: 502,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     const data = await response.json();
     const reply = data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
 
-    return res.status(200).json({ reply });
+    return new Response(JSON.stringify({ reply }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   } catch (error) {
-    console.error('Chat API error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    return new Response(JSON.stringify({ error: 'Internal server error', details: String(error) }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }
