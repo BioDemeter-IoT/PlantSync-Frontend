@@ -28,11 +28,33 @@ export default async function handler(req, res) {
       parameters: { max_new_tokens: 300, temperature: 0.7, return_full_text: false },
     });
 
-    const hfResponse = await makeRequest(
-      'https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta',
-      HF_TOKEN,
-      payload
-    );
+    // Try multiple HF endpoints
+    const endpoints = [
+      'huggingface.co',
+      'api-inference.huggingface.co',
+    ];
+
+    let hfResponse = null;
+    let lastError = '';
+
+    for (const host of endpoints) {
+      try {
+        hfResponse = await makeRequest(
+          host,
+          '/models/HuggingFaceH4/zephyr-7b-beta',
+          HF_TOKEN,
+          payload
+        );
+        if (hfResponse.status === 200) break;
+      } catch (e) {
+        lastError = String(e);
+        hfResponse = null;
+      }
+    }
+
+    if (!hfResponse) {
+      return res.status(502).json({ error: 'All HF endpoints failed', details: lastError });
+    }
 
     if (hfResponse.status !== 200) {
       return res.status(502).json({
@@ -58,15 +80,14 @@ export default async function handler(req, res) {
   }
 }
 
-function makeRequest(url, token, body) {
+function makeRequest(hostname, path, token, body) {
   return new Promise((resolve, reject) => {
-    const urlObj = new URL(url);
     const options = {
-      hostname: urlObj.hostname,
-      path: urlObj.pathname,
+      hostname,
+      path,
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': 'Bearer ' + token,
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(body),
       },
@@ -81,7 +102,7 @@ function makeRequest(url, token, body) {
     });
 
     req.on('error', (err) => reject(err));
-    req.setTimeout(25000, () => { req.destroy(); reject(new Error('Request timeout')); });
+    req.setTimeout(25000, () => { req.destroy(); reject(new Error('Timeout')); });
     req.write(body);
     req.end();
   });
