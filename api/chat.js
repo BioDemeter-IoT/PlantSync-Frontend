@@ -5,7 +5,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const HF_TOKEN = process.env.HF_TOKEN;
+    const HF_TOKEN = (process.env.HF_TOKEN || '').replace(/[\uFEFF\u200B\u00A0]/g, '').trim();
     if (!HF_TOKEN) {
       return res.status(500).json({ error: 'HF_TOKEN not configured on server' });
     }
