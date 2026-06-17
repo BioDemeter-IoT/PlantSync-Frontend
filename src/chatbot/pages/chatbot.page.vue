@@ -1,22 +1,59 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue';
+import { ref, nextTick, onMounted } from 'vue';
+import axios from 'axios';
+import { PlantService } from '@/plant-management/services/plant-api.service';
+import { useAuthenticationStore } from '@/iam/services/authentication.store';
+import { ProfileApiService } from '@/profile-management/services/profile-api.service';
 import type { ChatMessage } from '@/chatbot/model/chat-message.entity';
+import type { Plant } from '@/plant-management/model/plant.entity';
+
+const authStore = useAuthenticationStore();
+const profileApi = new ProfileApiService();
 
 const messages = ref<ChatMessage[]>([]);
 const input = ref('');
 const sending = ref(false);
 const chatContainer = ref<HTMLElement | null>(null);
+const plants = ref<Plant[]>([]);
 
 let messageId = 0;
 
 const popularQuestions = [
-  'How often should I water succulents?',
-  'Best indoor plants for low light?',
-  'How to prevent root rot?',
-  'When should I repot my plant?',
-  'Natural pest control methods?',
-  'How to increase humidity for plants?',
+  'How often should I water my plants?',
+  'What is the best light for indoor plants?',
+  'How do I prevent plant diseases?',
+  'When should I repot my plants?',
 ];
+
+onMounted(async () => {
+  // Load user's plants for context
+  if (authStore.userId) {
+    try {
+      const profile = await profileApi.getByUserId(authStore.userId);
+      plants.value = await PlantService.getByProfile(profile.id);
+    } catch { /* silent */ }
+  }
+});
+
+function buildSystemPrompt(): string {
+  let plantContext = '';
+  if (plants.value.length > 0) {
+    plantContext = '\n\nThe user has the following plants:\n';
+    plantContext += plants.value.map(p =>
+      `- ${p.name} (${p.species}): humidity=${p.humidity || 'unknown'}, next watering=${p.nextWateringDate || 'unknown'}, description=${p.description || 'none'}`
+    ).join('\n');
+  }
+
+  return `You are PlantCare Assistant, a friendly and knowledgeable AI expert in plant care, gardening, and botany. You help users take care of their plants by providing specific, actionable advice.
+
+Your responses should be:
+- Concise and practical (2-4 sentences max unless the user asks for more detail)
+- Focused on plant care: watering, light, soil, fertilizing, pests, repotting, propagation
+- Personalized based on the user's specific plants when available
+- In the same language the user writes in (Spanish or English)
+
+If the user asks about something unrelated to plants or gardening, politely redirect them to plant-related topics.${plantContext}`;
+}
 
 async function sendMessage(text?: string) {
   const msg = (text || input.value).trim();
@@ -32,17 +69,36 @@ async function sendMessage(text?: string) {
   sending.value = true;
   await scrollToBottom();
 
-  // Simulate bot response (stub)
-  setTimeout(async () => {
+  try {
+    // Build messages array with system prompt + conversation history
+    const apiMessages = [
+      { role: 'system', content: buildSystemPrompt() },
+      ...messages.value.map(m => ({
+        role: m.sender === 'user' ? 'user' : 'assistant',
+        content: m.content,
+      })),
+    ];
+
+    const response = await axios.post('/api/chat', { messages: apiMessages });
+    const reply = response.data.reply;
+
     messages.value.push({
       id: ++messageId,
-      content: `I received your question: "${msg}". The chatbot integration is pending backend implementation. I'll be able to help you with plant care advice soon!`,
+      content: reply,
       sender: 'bot',
       timestamp: new Date().toISOString(),
     });
+  } catch (error: any) {
+    messages.value.push({
+      id: ++messageId,
+      content: 'Sorry, I encountered an error. Please try again later.',
+      sender: 'bot',
+      timestamp: new Date().toISOString(),
+    });
+  } finally {
     sending.value = false;
     await scrollToBottom();
-  }, 1000);
+  }
 }
 
 async function scrollToBottom() {
@@ -55,24 +111,21 @@ async function scrollToBottom() {
 
 <template>
   <div class="chatbot-page">
-    <!-- Page header -->
     <div class="ps-page-header">
       <div>
         <h1 class="ps-page-header__title">Plant Care Assistant</h1>
-        <p class="ps-page-header__subtitle">Ask me anything about your plants</p>
+        <p class="ps-page-header__subtitle">Ask me anything about plant care and maintenance</p>
       </div>
     </div>
 
     <!-- Chat area -->
     <div class="chat-container ps-card">
       <div ref="chatContainer" class="chat-messages">
-        <!-- Empty state -->
         <div v-if="messages.length === 0" class="chat-empty">
           <i class="pi pi-comments"></i>
           <p>Start a conversation about plant care!</p>
         </div>
 
-        <!-- Messages -->
         <div
           v-for="msg in messages"
           :key="msg.id"
@@ -83,18 +136,16 @@ async function scrollToBottom() {
           <span class="chat-msg-time">{{ new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</span>
         </div>
 
-        <!-- Typing indicator -->
         <div v-if="sending" class="ps-chat-bubble ps-chat-bubble--bot">
-          <i class="pi pi-spinner pi-spin"></i> Typing...
+          <i class="pi pi-spinner pi-spin"></i> Thinking...
         </div>
       </div>
 
-      <!-- Input -->
       <div class="chat-input-area">
         <input
           v-model="input"
           type="text"
-          placeholder="Type your question..."
+          placeholder="Ask me about plant care..."
           class="chat-input"
           :maxlength="500"
           @keydown.enter="sendMessage()"
@@ -112,7 +163,7 @@ async function scrollToBottom() {
 
     <!-- Popular questions -->
     <div class="popular-questions">
-      <h3 class="popular-questions__title">Popular questions</h3>
+      <h3 class="popular-questions__title">Popular questions:</h3>
       <div class="popular-questions__grid">
         <button
           v-for="q in popularQuestions"
@@ -158,10 +209,6 @@ async function scrollToBottom() {
   font-size: 3rem;
   margin-bottom: 0.75rem;
   color: var(--ps-border);
-}
-
-.chat-empty p {
-  font-size: 0.95rem;
 }
 
 .chat-msg-text {
