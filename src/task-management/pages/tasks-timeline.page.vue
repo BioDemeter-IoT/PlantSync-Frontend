@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { TaskApiService } from '@/task-management/services/task-api.service';
+import { PlantService } from '@/plant-management/services/plant-api.service';
 import { useAuthenticationStore } from '@/iam/services/authentication.store';
 import { ProfileApiService } from '@/profile-management/services/profile-api.service';
 import type { Task, CreateTaskRequest } from '@/task-management/model/task.entity';
+import type { Plant } from '@/plant-management/model/plant.entity';
 
 const taskApi = new TaskApiService();
 const authStore = useAuthenticationStore();
 const profileApi = new ProfileApiService();
 
 const tasks = ref<Task[]>([]);
+const plants = ref<Plant[]>([]);
 const loading = ref(true);
 const error = ref('');
 
@@ -18,6 +21,8 @@ const showTaskDialog = ref(false);
 const newTaskAction = ref('');
 const newTaskDate = ref('');
 const newTaskNotes = ref('');
+const newTaskPlantId = ref<number | null>(null);
+const newTaskHumidity = ref(0);
 const creatingTask = ref(false);
 const profileId = ref<number | null>(null);
 
@@ -31,11 +36,17 @@ const completedTasks = computed(() =>
   tasks.value.filter(t => t.status === 'COMPLETED')
 );
 
+function getPlantName(plantId: number): string {
+  const plant = plants.value.find(p => p.id === plantId);
+  return plant ? plant.name : `Plant #${plantId}`;
+}
+
 onMounted(async () => {
   if (authStore.userId) {
     try {
       const profile = await profileApi.getByUserId(authStore.userId);
       profileId.value = profile.id;
+      plants.value = await PlantService.getByProfile(profile.id);
     } catch { /* silent */ }
   }
   await loadTasks();
@@ -50,7 +61,6 @@ async function loadTasks() {
       return;
     }
     const allTasks = await taskApi.getAll();
-    // Filter tasks to only show those belonging to the user's profile
     tasks.value = allTasks.filter(t => t.profileId === profileId.value);
   } catch {
     tasks.value = [];
@@ -70,6 +80,15 @@ async function completeTask(task: Task) {
     } else {
       error.value = 'Error completing task.';
     }
+  }
+}
+
+async function deleteTask(task: Task) {
+  try {
+    await taskApi.delete(task.id);
+    tasks.value = tasks.value.filter(t => t.id !== task.id);
+  } catch {
+    error.value = 'Error deleting task.';
   }
 }
 
@@ -99,21 +118,24 @@ function openNewTask() {
   newTaskAction.value = '';
   newTaskDate.value = '';
   newTaskNotes.value = '';
+  newTaskPlantId.value = plants.value.length > 0 ? plants.value[0].id : null;
+  newTaskHumidity.value = 0;
   showTaskDialog.value = true;
 }
 
 async function createTask() {
-  if (!newTaskAction.value.trim() || !newTaskDate.value) return;
+  if (!newTaskAction.value.trim() || !newTaskDate.value || !newTaskPlantId.value) return;
   if (!profileId.value) return;
 
   creatingTask.value = true;
+  error.value = '';
   try {
     const request: CreateTaskRequest = {
       action: newTaskAction.value.trim(),
       scheduledDate: newTaskDate.value,
-      plantId: 0,
+      plantId: newTaskPlantId.value,
       profileId: profileId.value,
-      humidity: 0,
+      humidity: newTaskHumidity.value,
       notes: newTaskNotes.value.trim() || undefined,
     };
     const task = await taskApi.create(request);
@@ -166,11 +188,15 @@ async function createTask() {
             <div class="ps-task-item__content">
               <p class="ps-task-item__name">{{ task.action }}</p>
               <p class="ps-task-item__meta">
-                <span v-if="task.notes">{{ task.notes }} · </span>
-                {{ formatDate(task.scheduledDate) }}
+                <span class="ps-task-plant">{{ getPlantName(task.plantId) }}</span>
+                <span v-if="task.notes"> · {{ task.notes }}</span>
+                 · {{ formatDate(task.scheduledDate) }}
               </p>
             </div>
             <span class="ps-badge" :class="getPriorityClass(task)">{{ getPriorityLabel(task) }}</span>
+            <button class="icon-btn icon-btn--danger" @click.stop="deleteTask(task)">
+              <i class="pi pi-trash"></i>
+            </button>
           </div>
         </div>
       </section>
@@ -223,8 +249,18 @@ async function createTask() {
           <input id="taskAction" v-model="newTaskAction" type="text" placeholder="e.g. Water the plant" />
         </div>
         <div class="ps-input-group">
+          <label for="taskPlant">Plant</label>
+          <select id="taskPlant" v-model="newTaskPlantId">
+            <option v-for="p in plants" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
+        </div>
+        <div class="ps-input-group">
           <label for="taskDate">Scheduled Date</label>
           <input id="taskDate" v-model="newTaskDate" type="date" />
+        </div>
+        <div class="ps-input-group">
+          <label for="taskHumidity">Humidity Level (0-100)</label>
+          <input id="taskHumidity" v-model.number="newTaskHumidity" type="number" min="0" max="100" placeholder="0" />
         </div>
         <div class="ps-input-group">
           <label for="taskNotes">Notes (optional)</label>
@@ -293,5 +329,31 @@ async function createTask() {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
+}
+
+.ps-task-plant {
+  color: var(--ps-primary);
+  font-weight: 500;
+}
+
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.icon-btn--danger {
+  color: #dc2626;
+}
+
+.icon-btn--danger:hover {
+  background: #fef2f2;
 }
 </style>

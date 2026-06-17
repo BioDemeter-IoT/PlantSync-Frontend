@@ -19,6 +19,9 @@ const profileId = ref<number | null>(null);
 const showCreateDialog = ref(false);
 const newPlantName = ref('');
 const newPlantSpecies = ref('');
+const newPlantDescription = ref('');
+const newPlantHumidity = ref<'BAJA' | 'MEDIA' | 'ALTA'>('MEDIA');
+const newPlantImageUrl = ref('');
 const newPlantWateringFreq = ref(7);
 const creating = ref(false);
 const createError = ref('');
@@ -79,6 +82,9 @@ function getLastWatered(nextWateringDate: string | undefined): string {
 function openCreateDialog() {
   newPlantName.value = '';
   newPlantSpecies.value = '';
+  newPlantDescription.value = '';
+  newPlantHumidity.value = 'MEDIA';
+  newPlantImageUrl.value = '';
   newPlantWateringFreq.value = 7;
   createError.value = '';
   showCreateDialog.value = true;
@@ -111,11 +117,11 @@ async function createPlant() {
     const request: CreatePlantRequest = {
       name: newPlantName.value.trim(),
       species: newPlantSpecies.value.trim(),
-      description: '',
+      description: newPlantDescription.value.trim() || undefined,
       acquisitionDate: getTodayDate(),
-      humidity: 'MEDIA',
+      humidity: newPlantHumidity.value,
       nextWateringDate: getNextWaterDate(newPlantWateringFreq.value),
-      imageUrl: undefined,
+      imageUrl: newPlantImageUrl.value.trim() || undefined,
       notificationsEnabled: true,
       profileId: profileId.value,
     };
@@ -239,17 +245,36 @@ async function deletePlant(plant: Plant, event: Event) {
 
         <div class="ps-input-group">
           <label for="plantName">Plant Name</label>
-          <input id="plantName" v-model="newPlantName" type="text" placeholder="e.g. My Tomato" />
+          <input id="plantName" v-model="newPlantName" type="text" placeholder="e.g. My Monstera" />
         </div>
 
         <div class="ps-input-group">
           <label for="plantSpecies">Species</label>
-          <input id="plantSpecies" v-model="newPlantSpecies" type="text" placeholder="e.g. Solanum lycopersicum" />
+          <input id="plantSpecies" v-model="newPlantSpecies" type="text" placeholder="e.g. Monstera Deliciosa" />
+        </div>
+
+        <div class="ps-input-group">
+          <label for="plantDescription">Description (optional)</label>
+          <input id="plantDescription" v-model="newPlantDescription" type="text" placeholder="e.g. Indoor tropical plant" />
+        </div>
+
+        <div class="ps-input-group">
+          <label>Humidity Level</label>
+          <select v-model="newPlantHumidity">
+            <option value="BAJA">Low (BAJA)</option>
+            <option value="MEDIA">Medium (MEDIA)</option>
+            <option value="ALTA">High (ALTA)</option>
+          </select>
         </div>
 
         <div class="ps-input-group">
           <label for="plantFreq">Watering Frequency (days)</label>
           <input id="plantFreq" v-model.number="newPlantWateringFreq" type="number" min="1" max="90" />
+        </div>
+
+        <div class="ps-input-group">
+          <label for="plantImage">Image URL (optional)</label>
+          <input id="plantImage" v-model="newPlantImageUrl" type="text" placeholder="https://..." />
         </div>
       </div>
 
