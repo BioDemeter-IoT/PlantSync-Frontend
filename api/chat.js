@@ -3,36 +3,49 @@ export const config = {
 };
 
 export default async function handler(request) {
-  // Edge functions always receive the method correctly
   if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed', method: request.method }), {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  const HF_TOKEN = process.env.HF_TOKEN;
-  if (!HF_TOKEN) {
-    return new Response(JSON.stringify({ error: 'HF_TOKEN not configured' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
   try {
-    const body = await request.json();
-    const { messages } = body;
+    const HF_TOKEN = process.env.HF_TOKEN;
+    if (!HF_TOKEN) {
+      return new Response(JSON.stringify({ error: 'Token not set' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
-    if (!messages || !Array.isArray(messages)) {
-      return new Response(JSON.stringify({ error: 'messages array is required', received: typeof body }), {
+    let body;
+    try {
+      body = await request.json();
+    } catch (e) {
+      return new Response(JSON.stringify({ error: 'Invalid JSON body', details: String(e) }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    // Use HuggingFace Inference API with a model that works on free tier
+    const { messages } = body;
+    if (!messages || !Array.isArray(messages)) {
+      return new Response(JSON.stringify({ error: 'messages array required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Use simple text generation endpoint (more reliable on free tier)
+    const prompt = messages.map(m => {
+      if (m.role === 'system') return `<|system|>\n${m.content}</s>`;
+      if (m.role === 'user') return `<|user|>\n${m.content}</s>`;
+      return `<|assistant|>\n${m.content}</s>`;
+    }).join('\n') + '\n<|assistant|>\n';
+
     const hfResponse = await fetch(
-      'https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta/v1/chat/completions',
+      'https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta',
       {
         method: 'POST',
         headers: {
@@ -40,35 +53,47 @@ export default async function handler(request) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'HuggingFaceH4/zephyr-7b-beta',
-          messages: messages,
-          max_tokens: 400,
-          temperature: 0.7,
+          inputs: prompt,
+          parameters: {
+            max_new_tokens: 300,
+            temperature: 0.7,
+            return_full_text: false,
+          },
         }),
       }
     );
 
+    const responseText = await hfResponse.text();
+
     if (!hfResponse.ok) {
-      const errorText = await hfResponse.text();
       return new Response(JSON.stringify({ 
-        error: 'AI service unavailable', 
+        error: 'HF API error', 
         status: hfResponse.status, 
-        details: errorText.substring(0, 200) 
+        details: responseText.substring(0, 300)
       }), {
         status: 502,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    const data = await hfResponse.json();
-    const reply = data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
+    let reply = 'Sorry, I could not generate a response.';
+    try {
+      const data = JSON.parse(responseText);
+      if (Array.isArray(data) && data[0]?.generated_text) {
+        reply = data[0].generated_text.trim();
+      } else if (data?.generated_text) {
+        reply = data.generated_text.trim();
+      }
+    } catch {
+      reply = responseText.substring(0, 500);
+    }
 
     return new Response(JSON.stringify({ reply }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (error) {
-    return new Response(JSON.stringify({ error: 'Internal error', details: String(error).substring(0, 200) }), {
+    return new Response(JSON.stringify({ error: 'Server error', details: String(error).substring(0, 300) }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
