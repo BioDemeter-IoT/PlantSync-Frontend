@@ -1,50 +1,28 @@
-export const config = {
-  runtime: 'edge',
-};
-
-export default async function handler(request) {
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
+export default async function handler(req, res) {
+  // Only allow POST
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
     const HF_TOKEN = process.env.HF_TOKEN;
     if (!HF_TOKEN) {
-      return new Response(JSON.stringify({ error: 'Token not set' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return res.status(500).json({ error: 'HF_TOKEN not configured on server' });
     }
 
-    let body;
-    try {
-      body = await request.json();
-    } catch (e) {
-      return new Response(JSON.stringify({ error: 'Invalid JSON body', details: String(e) }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    const { messages } = body;
+    const { messages } = req.body || {};
     if (!messages || !Array.isArray(messages)) {
-      return new Response(JSON.stringify({ error: 'messages array required' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return res.status(400).json({ error: 'messages array required', body: JSON.stringify(req.body).substring(0, 100) });
     }
 
-    // Use simple text generation endpoint (more reliable on free tier)
+    // Build Zephyr-style prompt
     const prompt = messages.map(m => {
       if (m.role === 'system') return `<|system|>\n${m.content}</s>`;
       if (m.role === 'user') return `<|user|>\n${m.content}</s>`;
       return `<|assistant|>\n${m.content}</s>`;
     }).join('\n') + '\n<|assistant|>\n';
 
-    const hfResponse = await fetch(
+    const hfRes = await fetch(
       'https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta',
       {
         method: 'POST',
@@ -63,16 +41,13 @@ export default async function handler(request) {
       }
     );
 
-    const responseText = await hfResponse.text();
+    const responseText = await hfRes.text();
 
-    if (!hfResponse.ok) {
-      return new Response(JSON.stringify({ 
-        error: 'HF API error', 
-        status: hfResponse.status, 
-        details: responseText.substring(0, 300)
-      }), {
-        status: 502,
-        headers: { 'Content-Type': 'application/json' },
+    if (!hfRes.ok) {
+      return res.status(502).json({
+        error: 'HF API error',
+        status: hfRes.status,
+        details: responseText.substring(0, 300),
       });
     }
 
@@ -88,14 +63,8 @@ export default async function handler(request) {
       reply = responseText.substring(0, 500);
     }
 
-    return new Response(JSON.stringify({ reply }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return res.status(200).json({ reply });
   } catch (error) {
-    return new Response(JSON.stringify({ error: 'Server error', details: String(error).substring(0, 300) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return res.status(500).json({ error: 'Server error', details: String(error).substring(0, 300) });
   }
 }
