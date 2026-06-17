@@ -45,9 +45,15 @@ async function loadTasks() {
   loading.value = true;
   error.value = '';
   try {
-    tasks.value = await taskApi.getAll();
+    const allTasks = await taskApi.getAll();
+    // Filter tasks to only show those belonging to the user's profile
+    if (profileId.value) {
+      tasks.value = allTasks.filter(t => t.profileId === profileId.value);
+    } else {
+      tasks.value = allTasks;
+    }
   } catch {
-    error.value = 'Error loading tasks.';
+    tasks.value = [];
   } finally {
     loading.value = false;
   }
