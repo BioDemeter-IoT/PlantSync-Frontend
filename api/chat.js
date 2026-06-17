@@ -1,5 +1,6 @@
+import https from 'https';
+
 export default async function handler(req, res) {
-  // Only allow POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -7,12 +8,12 @@ export default async function handler(req, res) {
   try {
     const HF_TOKEN = (process.env.HF_TOKEN || '').replace(/[\uFEFF\u200B\u00A0]/g, '').trim();
     if (!HF_TOKEN) {
-      return res.status(500).json({ error: 'HF_TOKEN not configured on server' });
+      return res.status(500).json({ error: 'HF_TOKEN not configured' });
     }
 
     const { messages } = req.body || {};
     if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: 'messages array required', body: JSON.stringify(req.body).substring(0, 100) });
+      return res.status(400).json({ error: 'messages array required' });
     }
 
     // Build Zephyr-style prompt
@@ -22,49 +23,66 @@ export default async function handler(req, res) {
       return `<|assistant|>\n${m.content}</s>`;
     }).join('\n') + '\n<|assistant|>\n';
 
-    const hfRes = await fetch(
+    const payload = JSON.stringify({
+      inputs: prompt,
+      parameters: { max_new_tokens: 300, temperature: 0.7, return_full_text: false },
+    });
+
+    const hfResponse = await makeRequest(
       'https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${HF_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          inputs: prompt,
-          parameters: {
-            max_new_tokens: 300,
-            temperature: 0.7,
-            return_full_text: false,
-          },
-        }),
-      }
+      HF_TOKEN,
+      payload
     );
 
-    const responseText = await hfRes.text();
-
-    if (!hfRes.ok) {
+    if (hfResponse.status !== 200) {
       return res.status(502).json({
         error: 'HF API error',
-        status: hfRes.status,
-        details: responseText.substring(0, 300),
+        status: hfResponse.status,
+        details: hfResponse.body.substring(0, 300),
       });
     }
 
     let reply = 'Sorry, I could not generate a response.';
     try {
-      const data = JSON.parse(responseText);
+      const data = JSON.parse(hfResponse.body);
       if (Array.isArray(data) && data[0]?.generated_text) {
         reply = data[0].generated_text.trim();
-      } else if (data?.generated_text) {
-        reply = data.generated_text.trim();
       }
     } catch {
-      reply = responseText.substring(0, 500);
+      reply = hfResponse.body.substring(0, 500);
     }
 
     return res.status(200).json({ reply });
   } catch (error) {
     return res.status(500).json({ error: 'Server error', details: String(error).substring(0, 300) });
   }
+}
+
+function makeRequest(url, token, body) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const options = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname,
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    };
+
+    const req = https.request(options, (response) => {
+      let data = '';
+      response.on('data', (chunk) => { data += chunk; });
+      response.on('end', () => {
+        resolve({ status: response.statusCode, body: data });
+      });
+    });
+
+    req.on('error', (err) => reject(err));
+    req.setTimeout(25000, () => { req.destroy(); reject(new Error('Request timeout')); });
+    req.write(body);
+    req.end();
+  });
 }
