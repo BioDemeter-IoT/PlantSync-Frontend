@@ -16,7 +16,7 @@ export default async function handler(req, res) {
     }
 
     const response = await fetch(
-      'https://router.huggingface.co/novita/v3/openai/chat/completions',
+      'https://api-inference.huggingface.co/models/meta-llama/Llama-3.2-3B-Instruct/v1/chat/completions',
       {
         method: 'POST',
         headers: {
