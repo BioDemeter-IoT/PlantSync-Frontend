@@ -6,9 +6,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const HF_TOKEN = (process.env.HF_TOKEN || '').replace(/[\uFEFF\u200B\u00A0]/g, '').trim();
-    if (!HF_TOKEN) {
-      return res.status(500).json({ error: 'HF_TOKEN not configured' });
+    const GROQ_KEY = (process.env.GROQ_API_KEY || '').replace(/[\uFEFF\u200B\u00A0]/g, '').trim();
+    if (!GROQ_KEY) {
+      return res.status(500).json({ error: 'GROQ_API_KEY not configured' });
     }
 
     const { messages } = req.body || {};
@@ -16,62 +16,34 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'messages array required' });
     }
 
-    // Build Zephyr-style prompt
-    const prompt = messages.map(m => {
-      if (m.role === 'system') return `<|system|>\n${m.content}</s>`;
-      if (m.role === 'user') return `<|user|>\n${m.content}</s>`;
-      return `<|assistant|>\n${m.content}</s>`;
-    }).join('\n') + '\n<|assistant|>\n';
-
     const payload = JSON.stringify({
-      inputs: prompt,
-      parameters: { max_new_tokens: 300, temperature: 0.7, return_full_text: false },
+      model: 'llama-3.1-8b-instant',
+      messages: messages,
+      max_tokens: 400,
+      temperature: 0.7,
     });
 
-    // Try multiple HF endpoints
-    const endpoints = [
-      'huggingface.co',
-      'api-inference.huggingface.co',
-    ];
+    const groqResponse = await makeRequest(
+      'api.groq.com',
+      '/openai/v1/chat/completions',
+      GROQ_KEY,
+      payload
+    );
 
-    let hfResponse = null;
-    let lastError = '';
-
-    for (const host of endpoints) {
-      try {
-        hfResponse = await makeRequest(
-          host,
-          '/models/HuggingFaceH4/zephyr-7b-beta',
-          HF_TOKEN,
-          payload
-        );
-        if (hfResponse.status === 200) break;
-      } catch (e) {
-        lastError = String(e);
-        hfResponse = null;
-      }
-    }
-
-    if (!hfResponse) {
-      return res.status(502).json({ error: 'All HF endpoints failed', details: lastError });
-    }
-
-    if (hfResponse.status !== 200) {
+    if (groqResponse.status !== 200) {
       return res.status(502).json({
-        error: 'HF API error',
-        status: hfResponse.status,
-        details: hfResponse.body.substring(0, 300),
+        error: 'AI service error',
+        status: groqResponse.status,
+        details: groqResponse.body.substring(0, 300),
       });
     }
 
     let reply = 'Sorry, I could not generate a response.';
     try {
-      const data = JSON.parse(hfResponse.body);
-      if (Array.isArray(data) && data[0]?.generated_text) {
-        reply = data[0].generated_text.trim();
-      }
+      const data = JSON.parse(groqResponse.body);
+      reply = data.choices?.[0]?.message?.content || reply;
     } catch {
-      reply = hfResponse.body.substring(0, 500);
+      reply = groqResponse.body.substring(0, 500);
     }
 
     return res.status(200).json({ reply });
